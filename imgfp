@@ -273,16 +273,20 @@ sub main(@){
     };
     if(not defined $fingerprint){
       print STDERR "WARNING: skipped $file\n$@\n";
+      $$fingerprints{$file} = undef;
+    }else{
+      $$fingerprints{$file} = $fingerprint;
     }
-    $$fingerprints{$file} = $fingerprint;
   }
 
   if($mode eq $MODE_FINGERPRINT){
     for my $file(@files){
+      my $fp = $$fingerprints{$file};
+      $fp = "" if not defined $fp;
       if(@files == 1){
-        print "$$fingerprints{$file}\n";
+        print "$fp\n";
       }else{
-        print "$$fingerprints{$file} $file\n";
+        print "$fp $file\n";
       }
     }
   }elsif($mode eq $MODE_COMPARE or $mode eq $MODE_MATCH){
