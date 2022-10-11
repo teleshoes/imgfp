@@ -39,14 +39,15 @@ my $USAGE = "Usage:
 
   $0 [OPTS] --compare IMG_SRC IMG_COMP [IMG_COMP ..]
   $0 [OPTS] --diff    IMG_SRC IMG_COMP [IMG_COMP ..]
-    find the similarity between the fingerprints of IMG_SRC and IMG_COMP
+  $0 [OPTS] -d       IMG_SRC IMG_COMP [IMG_COMP ..]
+    find the SIMILARITY_PCT between the fingerprints of IMG_SRC and IMG_COMP
       -calculate the fingerprints of IMG_SRC and each IMG_COMP as in --fp
       -sum the absolute difference of each channel (RGB or gray) of each pixel
       -subtract this value from the maximum possible difference
       -express as a percentage
 
-  $0 [OPTS] --fp IMG
   $0 [OPTS] --fingerprint IMG
+  $0 [OPTS] --fp          IMG
   $0 [OPTS] IMG
     calculate a 'fingerprint' image of IMG, and print the pixels as hex chars
       -(A) load image
@@ -77,6 +78,7 @@ my $USAGE = "Usage:
         SQUARE_SIZE^2 * COLORSPACE_BITS / 4
       The default is --size=16
 
+      -s SQUARE_SIZE | --size SQUARE_SIZE | --square-size SQUARE_SIZE
       --size=SQUARE_SIZE | --square-size=SQUARE_SIZE
         height and width in pixels of the square fingerprint image
         (odd SQUARE_SIZE results in padding for --mono fingerprints)
@@ -85,13 +87,13 @@ my $USAGE = "Usage:
       Control the number of bits per pixel in the fingerprint.
       The default is --mono
 
-      -c | --color | --rgb
+      --rgb | --color
         12-bit RGB  (COLORSPACE_BITS=12)
           1 pixel is 3 hex chars, e.g.: white is 'fff'
-      -g | --gray | --grayscale
+      --gray | --grayscale
         4-bit grayscale (COLORSPACE_BITS=4)
           1 pixel is 1 hex char, e.g.: white is 'f'
-      -m | --mono | --bw
+      --mono | --bw
         1-bit mono (COLORSPACE_BITS=1)
         4 pixels is 1 hex char, e.g.: 'a' is white black white black
 
@@ -108,6 +110,7 @@ my $USAGE = "Usage:
         this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
 
     MISC
+      --debug-dir DEBUG_DIR
       --debug-dir=DEBUG_DIR
         write fingerprint images in BMP format to DEBUG_DIR
 ";
@@ -125,17 +128,20 @@ sub main(@){
     if($arg =~ /^(-h|--help)$/){
       print $USAGE;
       exit 0;
-    }elsif($arg =~ /^(--compare|--diff)$/){
+    }elsif($arg =~ /^(--compare|--diff|-d)$/){
       $mode = $MODE_COMPARE;
-    }elsif($arg =~ /^(--fp|--fingerprint)$/){
+    }elsif($arg =~ /^(--fingerprint|--fp)$/){
       $mode = $MODE_FINGERPRINT;
-    }elsif($arg =~ /^(?:--size|--square-size)=(\d+)$/){
+    }elsif($arg =~ /^(?:-s|--size|--square-size)=(\d+)$/){
       $size = $1;
-    }elsif($arg =~ /^(-c|--color|--rgb)$/){
+    }elsif($arg =~ /^(?:--size|--square-size)$/ and @_ > 0 and $_[0]=~ /^(\d+)$/){
+      $size = $1;
+      shift;
+    }elsif($arg =~ /^(--rgb|--color)$/){
       $colorSpace = $COLOR_RGB_12;
-    }elsif($arg =~ /^(-g|--gray|--grayscale)$/){
+    }elsif($arg =~ /^(--gray|--grayscale)$/){
       $colorSpace = $COLOR_GRAY_4;
-    }elsif($arg =~ /^(-m|--mono|--bw)$/){
+    }elsif($arg =~ /^(--mono|--bw)$/){
       $colorSpace = $COLOR_MONO_1;
     }elsif($arg =~ /^(--stretch|--ignore-aspect-ratio)$/){
       $squareMode = $SQUARE_MODE_STRETCH;
@@ -143,6 +149,8 @@ sub main(@){
       $squareMode = $SQUARE_MODE_PAD;
     }elsif($arg =~ /^--debug-dir=(.+)$/){
       $debugDir = $1;
+    }elsif($arg =~ /^--debug-dir$/ and @_ > 0){
+      $debugDir = shift;
     }elsif(-f $arg){
       push @files, $arg;
     }else{
