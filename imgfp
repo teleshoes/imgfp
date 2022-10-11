@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use Time::HiRes qw(time);
 
 #Copyright 2022 Elliot Wolk
 #License: GPLv3
@@ -11,62 +12,325 @@ use warnings;
 
 use Graphics::Magick;
 use File::MimeInfo::Magic qw(mimetype);
-use MIME::Base64 qw(encode_base64);
 
-sub fingerprint($$);
+sub fingerprint($$$$$$);
+sub bitStrToHexStr($);
+sub colorToBitStr($$);
+
+my $COLOR_RGB_12  = "RGB12";
+my $COLOR_GRAY_4 = "GRAY4";
+my $COLOR_MONO_1 = "MONO1";
+
+my $QUANTIZE_PARAMS = {
+  $COLOR_RGB_12  => {colors => 4096, colorspace => "RGB"},  #three hex chars for every pixel
+  $COLOR_GRAY_4 => {colors => 16,    colorspace => "RGB"},  #one hex char for every pixel
+  $COLOR_MONO_1 => {colors => 2,     colorspace => "Gray"}, #one hex char for every 4 pixels
+};
+
+my $SQUARE_MODE_PAD = "pad";
+my $SQUARE_MODE_STRETCH = "stretch";
+
+my $MODE_COMPARE = "compare";
+my $MODE_FINGERPRINT = "fingerprint";
+
+my $USAGE = "Usage:
+  $0 -h | --help
+    show this message
+
+  $0 [OPTS] --compare IMG_SRC IMG_COMP [IMG_COMP ..]
+  $0 [OPTS] --diff    IMG_SRC IMG_COMP [IMG_COMP ..]
+    find the similarity between the fingerprints of IMG_SRC and IMG_COMP
+      -calculate the fingerprints of IMG_SRC and each IMG_COMP as in --fp
+      -sum the absolute difference of each channel (RGB or gray) of each pixel
+      -subtract this value from the maximum possible difference
+      -express as a percentage
+
+  $0 [OPTS] --fp IMG
+  $0 [OPTS] --fingerprint IMG
+  $0 [OPTS] IMG
+    calculate a 'fingerprint' image of IMG, and print the pixels as hex chars
+      -(A) load image
+      -(B) transform image
+        -(B1) blur - blur the image with a radius of 1.5% the maximum dimension
+        -(B2) normalize - modestly increase contrast by stretching intensity range
+                -find dark intensity that 2% of pixels are darker than
+                -find light intensity that 1% of pixels are whiter than
+                -linearly scale intensity of all pixels between these two values
+        -(B3) equalize - maximize contrast by flattening the intensity histogram
+                -ensure the same number of pixels exist for each gray level
+        -(B4) adjust aspect ratio - optionallty add a border to fit into a square
+                -if set, ensures that stretching the image affects the fingerprint
+        -(B5) resize - resize image to a (small) square with pixel sampling
+        -(B6) quantize - reduce colorspace to 12-bit-rgb/4-bit-gray/1-bit-mono
+      -(C) debug output - optionally write final image to a bmp
+      -(D) extract pixel data as single bitstring (left-to-right, top-to-bottom)
+      -(E) convert to hex
+
+  $0 [OPTS] IMG IMG [IMG ..]
+    find the FINGERPRINT of each IMG as in --fp
+    print \"FINGERPRINT IMG\" for each IMG
+
+  OPTS
+    FINGERPRINT SIZE
+      Control the height and width of the fingerprint image square.
+      The length, in characters, of the hex fingerprint is:
+        SQUARE_SIZE^2 * COLORSPACE_BITS / 4
+      The default is --size=16
+
+      --size=SQUARE_SIZE | --square-size=SQUARE_SIZE
+        height and width in pixels of the square fingerprint image
+        (odd SQUARE_SIZE results in padding for --mono fingerprints)
+
+    FINGERPRINT COLORSPACE
+      Control the number of bits per pixel in the fingerprint.
+      The default is --mono
+
+      -c | --color | --rgb
+        12-bit RGB  (COLORSPACE_BITS=12)
+          1 pixel is 3 hex chars, e.g.: white is 'fff'
+      -g | --gray | --grayscale
+        4-bit grayscale (COLORSPACE_BITS=4)
+          1 pixel is 1 hex char, e.g.: white is 'f'
+      -m | --mono | --bw
+        1-bit mono (COLORSPACE_BITS=1)
+        4 pixels is 1 hex char, e.g.: 'a' is white black white black
+
+    FINGERPRINT ASPECT RATIO
+      Control whether a changed aspect ratio affects the fingerprint.
+      The default is --pad
+
+      --stretch | --ignore-aspect-ratio
+        stretch the fingerprint (with pixel sampling) to fit in a square
+        this ensures that changing the aspect ratio of an image has SMALL impact on fingerprint
+
+      --pad | --keep-aspect-ratio
+        add a top/bottom or left/right black border to the fingerprint to fit in a square
+        this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
+
+    MISC
+      --debug-dir=DEBUG_DIR
+        write fingerprint images in BMP format to DEBUG_DIR
+";
 
 sub main(@){
+  my $mode = $MODE_FINGERPRINT;
+  my $size = 16;
+  my $colorSpace = $COLOR_MONO_1;
+  my $squareMode = $SQUARE_MODE_PAD;
+  my $debugDir = undef;
+
+  my @files;
+  while(@_ > 0){
+    my $arg = shift;
+    if($arg =~ /^(-h|--help)$/){
+      print $USAGE;
+      exit 0;
+    }elsif($arg =~ /^(--compare|--diff)$/){
+      $mode = $MODE_COMPARE;
+    }elsif($arg =~ /^(--fp|--fingerprint)$/){
+      $mode = $MODE_FINGERPRINT;
+    }elsif($arg =~ /^(?:--size|--square-size)=(\d+)$/){
+      $size = $1;
+    }elsif($arg =~ /^(-c|--color|--rgb)$/){
+      $colorSpace = $COLOR_RGB_12;
+    }elsif($arg =~ /^(-g|--gray|--grayscale)$/){
+      $colorSpace = $COLOR_GRAY_4;
+    }elsif($arg =~ /^(-m|--mono|--bw)$/){
+      $colorSpace = $COLOR_MONO_1;
+    }elsif($arg =~ /^(--stretch|--ignore-aspect-ratio)$/){
+      $squareMode = $SQUARE_MODE_STRETCH;
+    }elsif($arg =~ /^(--pad|--keep-aspect-ratio)$/){
+      $squareMode = $SQUARE_MODE_PAD;
+    }elsif($arg =~ /^--debug-dir=(.+)$/){
+      $debugDir = $1;
+    }elsif(-f $arg){
+      push @files, $arg;
+    }else{
+      die "$USAGE\nERROR: unknown arg $arg\n";
+    }
+  }
+
+  if(@files == 0){
+    die "$USAGE\nERROR: no files given\n";
+  }
+
+  my $fingerprints = {};
   my $GM = Graphics::Magick->new;
-  for my $file(@_){
-    print encode_base64(fingerprint($GM, $file));
+  for my $file(@files){
+    my $fingerprint = eval {
+      fingerprint($GM, $file, $size, $colorSpace, $squareMode, $debugDir);
+    };
+    if(not defined $fingerprint){
+      print STDERR "WARNING: skipped $file\n";
+    }
+    $$fingerprints{$file} = $fingerprint;
+  }
+
+  if($mode eq $MODE_FINGERPRINT){
+    for my $file(@files){
+      if(@files == 1){
+        print "$$fingerprints{$file}\n";
+      }else{
+        print "$$fingerprints{$file} $file\n";
+      }
+    }
+  }elsif($mode eq $MODE_COMPARE){
+    my ($srcFile, @compFiles) = @files;
+    die "$USAGE\nERROR: no files to compare\n" if @compFiles == 0;
+    my $srcFP = $$fingerprints{$srcFile};
+    for my $compFile(@compFiles){
+      my $compFP = $$fingerprints{$compFile};
+      my $pct;
+      if(not defined $srcFP or not defined $compFP){
+        $pct = 0;
+      }else{
+        $pct = 100.0 * fpCompare($srcFP, $compFP, $colorSpace);
+      }
+      if(@compFiles == 1){
+        printf "%.2f\n", $pct;
+      }else{
+        printf "%-6.2f %s\n", $pct, $compFile;
+      }
+    }
+  }else{
+    die "ERROR: unknown mode $mode\n";
   }
 }
 
-#1) Read image.
-#2) Resample to 160x160 to standardize size.
-#3) Grayscale by reducing saturation.
-#4) Blur a lot to get rid of noise.
-#5) Normalize to spread out intensity as much as possible.
-#6) Equalize to make image as contrasty as possible.
-#7) Resample again down to 16x16.
-#8) Reduce to 1bpp.
-#9) The fingerprint is this raw image data.
+sub fpCompare($$$){
+  my ($fp1, $fp2, $colorSpace) = @_;
+  my $maxDiff = length($fp1) * ($colorSpace eq $COLOR_MONO_1 ? 4 : 15);
 
-sub fingerprint($$){
-  my ($GM, $file) = @_;
-  my $blob;
-
-  @$GM = ();
-  eval {
-    if ((mimetype($file)||'') =~ /^(audio|video)/) {
-      die("not fingerprinting A/V file: $file\n");
+  my $diff = 0;
+  for(my $i=0; $i<length $fp1; $i++){
+    my $h1 = oct("0x" . substr($fp1, $i, 1));
+    my $h2 = oct("0x" . substr($fp2, $i, 1));
+    if($colorSpace eq $COLOR_MONO_1){
+      my $b1 = sprintf ("%04b", $h1);
+      my $b2 = sprintf ("%04b", $h2);
+      for(my $i=0; $i<4; $i++){
+        $diff += 1 if substr($b1, $i, 1) ne substr($b2, $i, 1);
+      }
+    }else{
+      my $colorDiff = $h2 - $h1;
+      $colorDiff = 0-$colorDiff if $colorDiff < 0;
+      $diff += $colorDiff;
     }
+  }
+  return 1 - $diff/$maxDiff;
+}
 
-    if (!$GM->Ping($file)) {
-      die("not fingerprinting unknown-type file: $file\n");
+sub fingerprint($$$$$$){
+  my ($GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir) = @_;
+
+  my $handleError = sub{
+    if($_[0]){
+      die "ERROR: graphicsmagick failed for $file\n$_[0]\n";
     }
-
-    my $error;
-    $error = $GM->Read($file) unless $error;
-    $error = $GM->Sample("160x160!") unless $error;
-    $error = $GM->Modulate(saturation=>-100) unless $error;
-    $error = $GM->Blur(radius=>3,sigma=>99) unless $error;
-    $error = $GM->Normalize() unless $error;
-    $error = $GM->Equalize() unless $error;
-    $error = $GM->Sample("16x16") unless $error;
-    $error = $GM->Threshold() unless $error;
-    $error = $GM->Set(magick=>'mono') unless $error;
-    die "ERROR: $error\n" if $error;
-
-    ($blob) = $GM->ImageToBlob();
   };
 
-  if($@){
-    print STDERR "WARNING: imagemagick failed for $file\n$@\n";
-    return undef;
-  }else{
-    return $blob;
+  #(A) clear previous image and load new
+  @$GM = ();
+  &$handleError($GM->Read($file));
+  my $w = $GM->Get('width');
+  my $h = $GM->Get('height');
+
+  #(B) transform image
+  #  (B1) blur - gaussian blur with a radius of 1.5% the maximum dimension
+  my $radius = $w > $h ? int(1.5 * $w/100) : int(1.5 * $h/100);
+  $radius = 3 if $radius < 3;
+  &$handleError($GM->Blur(radius=>$radius, sigma=>60));
+
+  #  (B2) normalize - modestly increase contrast by stretching intensity range
+  #         -find dark intensity that 2% of pixels are darker than
+  #         -find light intensity that 1% of pixels are whiter than
+  #         -linearly scale intensity of all pixels between these two values
+  &$handleError($GM->Normalize());
+
+  #  (B3) equalize - maximize contrast by flattening the intensity histogram
+  #         -ensure the same number of pixels exist for each gray level
+  &$handleError($GM->Equalize());
+
+  #  (B4) adjust aspect ratio - optionally add a border to fit into a square
+  #         -if set, ensures that stretching the image affects the fingerprint
+  if($squareMode eq $SQUARE_MODE_PAD){
+    my $borderW = $h > $w ? int(($h-$w)/2) : 0;
+    my $borderH = $w > $h ? int(($w-$h)/2) : 0;
+    &$handleError($GM->Border(width=>$borderW, height=>$borderH, fill=>"black"));
   }
+
+  #  (B5) resize - resize image to a (small) square with pixel sampling
+  &$handleError($GM->Sample("${squareSize}x${squareSize}!"));
+
+  #  (B6) quantize - reduce colorspace to 12-bit-rgb/4-bit-gray/1-bit-mono
+  &$handleError($GM->Quantize(%{$$QUANTIZE_PARAMS{$colorSpace}}));
+
+  #(C) debug output - optionally write final image to a bmp
+  if(defined $debugOutputDir){
+    my $bmp = $file;
+    $bmp =~ s/\//%/g;
+    $bmp =~ s/[^a-zA-Z0-9]/_/g;
+    $bmp = nowMillis() . "_$bmp";
+    $bmp .= ".bmp";
+    $bmp = "$debugOutputDir/$bmp";
+
+    &$handleError($GM->Set(magick=>'bmp'));
+    my ($blob) = $GM->ImageToBlob();
+
+    open FH, "> $bmp" or die "ERROR: could not write $bmp\n$!\n";
+    print FH $blob;
+    close FH;
+  }
+
+
+  #(D) extract pixel data as single bitstring (left-to-right, top-to-bottom)
+  my $colorCount = $$QUANTIZE_PARAMS{$colorSpace}{colors};
+  my $bitStr = "";
+  for my $x(0..$squareSize-1){
+    for my $y(0..$squareSize-1){
+      my $px = $GM->Get("pixel[$y,$x]");
+      if($px =~ /^(\d+),(\d+),(\d+),(\d+)$/){
+        my ($r, $g, $b, $a) = ($1, $2, $3, $4);
+        if($colorSpace eq $COLOR_RGB_12){
+          $bitStr .= colorToBitStr($r, 4);
+          $bitStr .= colorToBitStr($g, 4);
+          $bitStr .= colorToBitStr($b, 4);
+        }elsif($colorSpace eq $COLOR_GRAY_4){
+          $bitStr .= colorToBitStr($r, 4);
+        }elsif($colorSpace eq $COLOR_MONO_1){
+          $bitStr .= $r > 0 ? "1" : "0";
+        }else{
+          die "ERROR: unknown color mode $colorSpace\n";
+        }
+      }else{
+        die "ERROR: bad pixel $px\n";
+      }
+    }
+  }
+  #fill last hex char for odd-sized black-and-white squares
+  $bitStr .= '0' x (length($bitStr) % 4);
+
+  #(E) convert to hex
+  my $hexStr = bitStrToHexStr($bitStr);
+
+  return $hexStr;
+}
+
+sub bitStrToHexStr($){
+  my ($bitStr) = @_;
+  my $hexStr = $bitStr;
+  $hexStr =~ s/(....)/sprintf("%x", oct("0b$1"))/ge;
+  return $hexStr;
+}
+
+sub colorToBitStr($$){
+  my ($colorVal, $bitCount) = @_;
+  my $colorCount = 2**$bitCount;
+  return sprintf "%0${bitCount}b", int($colorVal/(65536/$colorCount));
+}
+
+sub nowMillis(){
+  return int(time*1000.0 + 0.5);
 }
 
 &main(@ARGV);
