@@ -88,6 +88,10 @@ my $USAGE = "Usage:
       -(D) extract pixel data as single bitstring (left-to-right, top-to-bottom)
       -(E) convert to hex
 
+  IMAGE_FILE = IMG_SRC | IMG_COMP | IMG
+    path to a visual image file
+    if '--' is given, read files, one per line, from STDIN
+
   OPTS
     FINGERPRINT SIZE
       Control the height and width of the fingerprint image square.
@@ -237,6 +241,15 @@ sub main(@){
       $debugDir = $1;
     }elsif($arg =~ /^--debug-dir$/ and @_ > 0){
       $debugDir = shift;
+    }elsif($arg =~ /^--$/){
+      foreach my $line(<STDIN>) {
+        chomp $line;
+        if(-f $line){
+          push @files, $line;
+        }else{
+          die "$USAGE\nERROR: malformed file on STDIN\n$line\n";
+        }
+      }
     }elsif(-f $arg){
       push @files, $arg;
     }else{
