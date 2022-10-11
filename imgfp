@@ -31,6 +31,7 @@ my $SQUARE_MODE_PAD = "pad";
 my $SQUARE_MODE_STRETCH = "stretch";
 
 my $MODE_COMPARE = "compare";
+my $MODE_MATCH = "match";
 my $MODE_FINGERPRINT = "fingerprint";
 
 my $USAGE = "Usage:
@@ -45,6 +46,13 @@ my $USAGE = "Usage:
       -sum the absolute difference of each channel (RGB or gray) of each pixel
       -subtract this value from the maximum possible difference
       -express as a percentage
+
+  $0 [OPTS] --match   IMG_SRC IMG_COMP [IMG_COMP ..]
+  $0 [OPTS] --matches IMG_SRC IMG_COMP [IMG_COMP ..]
+  $0 [OPTS] -m        IMG_SRC IMG_COMP [IMG_COMP ..]
+    for each IMG_COMP, get the SIMILARITY_PCT with IMG_SRC as in --compare,
+      and print 'yes' or 'no' if SIMILARITY_PCT >= THRESHOLD_PCT
+    default threshold is 95%
 
   $0 [OPTS] --fingerprint IMG
   $0 [OPTS] --fp          IMG
@@ -109,6 +117,15 @@ my $USAGE = "Usage:
         add a top/bottom or left/right black border to the fingerprint to fit in a square
         this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
 
+    FINGERPRINT COMPARISON
+      Control the threshold at which --match prints yes.
+      The default is --threshold=95.0%
+
+      -t THRESHOLD_PCT | --threshold THRESHOLD_PCT
+      --threshold=THRESHOLD_PCT
+        fingerprints with a SIMILARITY_PCT >= THRESHOLD_PCT print 'yes' in --match
+        e.g.: -t 90.0   --threshold=90%   --threshold 86.714
+
     MISC
       --debug-dir DEBUG_DIR
       --debug-dir=DEBUG_DIR
@@ -120,6 +137,7 @@ sub main(@){
   my $size = 16;
   my $colorSpace = $COLOR_MONO_1;
   my $squareMode = $SQUARE_MODE_PAD;
+  my $thresholdPct = 95.0;
   my $debugDir = undef;
 
   my @files;
@@ -130,6 +148,8 @@ sub main(@){
       exit 0;
     }elsif($arg =~ /^(--compare|--diff|-d)$/){
       $mode = $MODE_COMPARE;
+    }elsif($arg =~ /^(--match|--matches|-m)$/){
+      $mode = $MODE_MATCH;
     }elsif($arg =~ /^(--fingerprint|--fp)$/){
       $mode = $MODE_FINGERPRINT;
     }elsif($arg =~ /^(?:-s|--size|--square-size)=(\d+)$/){
@@ -147,6 +167,11 @@ sub main(@){
       $squareMode = $SQUARE_MODE_STRETCH;
     }elsif($arg =~ /^(--pad|--keep-aspect-ratio)$/){
       $squareMode = $SQUARE_MODE_PAD;
+    }elsif($arg =~ /^--threshold=(\d+|\d*\.\d+)%?$/){
+      $thresholdPct = $1;
+    }elsif($arg =~ /^(-t|--threshold)$/ and @_ > 0 and $_[0]=~/^(\d+|\d*\.\d+)%?$/){
+      $thresholdPct = $1;
+      shift;
     }elsif($arg =~ /^--debug-dir=(.+)$/){
       $debugDir = $1;
     }elsif($arg =~ /^--debug-dir$/ and @_ > 0){
@@ -182,7 +207,7 @@ sub main(@){
         print "$$fingerprints{$file} $file\n";
       }
     }
-  }elsif($mode eq $MODE_COMPARE){
+  }elsif($mode eq $MODE_COMPARE or $mode eq $MODE_MATCH){
     my ($srcFile, @compFiles) = @files;
     die "$USAGE\nERROR: no files to compare\n" if @compFiles == 0;
     my $srcFP = $$fingerprints{$srcFile};
@@ -194,10 +219,19 @@ sub main(@){
       }else{
         $pct = 100.0 * fpCompare($srcFP, $compFP, $colorSpace);
       }
-      if(@compFiles == 1){
-        printf "%.2f\n", $pct;
-      }else{
-        printf "%-6.2f %s\n", $pct, $compFile;
+      if($mode eq $MODE_COMPARE){
+        if(@compFiles == 1){
+          printf "%.2f\n", $pct;
+        }else{
+          printf "%-6.2f %s\n", $pct, $compFile;
+        }
+      }elsif($mode eq $MODE_MATCH){
+        my $res = $pct >= $thresholdPct ? "yes" : "no";
+        if(@compFiles == 1){
+          print "$res\n";
+        }else{
+          printf "%3s %s\n", $res, $compFile;
+        }
       }
     }
   }else{
