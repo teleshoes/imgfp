@@ -1,7 +1,6 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Time::HiRes qw(time);
 
 #Copyright 2022 Elliot Wolk
 #License: GPLv3
@@ -10,6 +9,7 @@ use Time::HiRes qw(time);
 #  Copyright © 2006-2022 by Jonathan H N Chin <code@jhnc.org>.
 #  https://github.com/jhnc/findimagedupes
 
+use Time::HiRes qw(time);
 use Graphics::Magick;
 use File::MimeInfo::Magic qw(mimetype);
 
