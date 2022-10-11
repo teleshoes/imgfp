@@ -17,9 +17,9 @@ sub fingerprint($$$$$$);
 sub bitStrToHexStr($);
 sub colorToBitStr($$);
 
-my $COLOR_RGB_12  = "RGB12";
-my $COLOR_GRAY_4 = "GRAY4";
-my $COLOR_MONO_1 = "MONO1";
+my $COLOR_RGB_12  = "rgb12";
+my $COLOR_GRAY_4 = "gray4";
+my $COLOR_MONO_1 = "mono1";
 
 my $QUANTIZE_PARAMS = {
   $COLOR_RGB_12  => {colors => 4096, colorspace => "RGB"},  #three hex chars for every pixel
@@ -96,14 +96,24 @@ my $USAGE = "Usage:
       The default is --mono
 
       --rgb | --color
-        12-bit RGB  (COLORSPACE_BITS=12)
-          1 pixel is 3 hex chars, e.g.: white is 'fff'
+        same as: --colorspace=rgb12
       --gray | --grayscale
-        4-bit grayscale (COLORSPACE_BITS=4)
-          1 pixel is 1 hex char, e.g.: white is 'f'
+        same as: --colorspace=gray4
       --mono | --bw
-        1-bit mono (COLORSPACE_BITS=1)
-        4 pixels is 1 hex char, e.g.: 'a' is white black white black
+        same as: --colorspace=mono1
+
+      --colorspace COLORSPACE
+      --colorspace=COLORSPACE
+        COLORSPACE
+          rgb12  = 12-bit RGB  (COLORSPACE_BITS=12)
+                     every 1 pixel is 3 hex chars
+                     e.g.: white black white black = 'fff000fff000'
+          gray4  = 4-bit grayscale (COLORSPACE_BITS=4)
+                     every 1 pixel is 1 hex char
+                     e.g.: white black white black = 'f0f0'
+          mono1  = 1-bit mono (COLORSPACE_BITS=1)
+                     every 4 pixels is 1 hex char
+                     e.g.: white black white black = 'a'
 
     FINGERPRINT ASPECT RATIO
       Control whether a changed aspect ratio affects the fingerprint.
@@ -157,6 +167,10 @@ sub main(@){
     }elsif($arg =~ /^(?:--size|--square-size)$/ and @_ > 0 and $_[0]=~ /^(\d+)$/){
       $size = $1;
       shift;
+    }elsif($arg =~ /^--colorspace=(.+)$/){
+      $colorSpace = $1;
+    }elsif($arg =~ /^--colorspace$/ and @_ > 0){
+      $colorSpace = shift;
     }elsif($arg =~ /^(--rgb|--color)$/){
       $colorSpace = $COLOR_RGB_12;
     }elsif($arg =~ /^(--gray|--grayscale)$/){
@@ -185,6 +199,8 @@ sub main(@){
 
   if(@files == 0){
     die "$USAGE\nERROR: no files given\n";
+  }elsif(not defined $$QUANTIZE_PARAMS{$colorSpace}){
+    die "$USAGE\nERROR: unknown COLORSPACE $colorSpace\n";
   }
 
   my $fingerprints = {};
