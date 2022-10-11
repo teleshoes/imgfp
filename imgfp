@@ -9,15 +9,22 @@ use warnings;
 #  Copyright © 2006-2022 by Jonathan H N Chin <code@jhnc.org>.
 #  https://github.com/jhnc/findimagedupes
 
+use Cwd 'abs_path';
 use Time::HiRes qw(time);
 use Graphics::Magick;
 use File::MimeInfo::Magic qw(mimetype);
 
 sub fpCompare($$$);
-sub fingerprint($$$$$$);
+sub fetchFingerprint($$$$$$$$$);
+sub calculateFingerprint($$$$$$);
 sub bitStrToHexStr($);
 sub colorToBitStr($$);
+sub readCache($);
+sub appendCache($$$$$);
+sub statFsizeMtime($);
 sub nowMillis();
+
+my $CACHE_DIR = "$ENV{HOME}/.cache/imgfp";
 
 my $COLOR_RGB_12  = "rgb12";
 my $COLOR_GRAY_4 = "gray4";
@@ -31,6 +38,10 @@ my $QUANTIZE_PARAMS = {
 
 my $SQUARE_MODE_PAD = "pad";
 my $SQUARE_MODE_STRETCH = "stretch";
+
+my $CACHE_MODE_RW = "rw";
+my $CACHE_MODE_RO = "ro";
+my $CACHE_MODE_NONE = "none";
 
 my $MODE_COMPARE = "compare";
 my $MODE_MATCH = "match";
@@ -134,6 +145,32 @@ my $USAGE = "Usage:
         fingerprints with a SIMILARITY_PCT >= THRESHOLD_PCT print 'yes' in --match
         e.g.: -t 90.0   --threshold=90%   --threshold 86.714
 
+    FINGERPRINT CACHE
+      Cache fingerprints in CACHE_FILE to improve performance of future calls.
+      Files must match filesize, mtime, and absolute path, or they will be recalculated.
+      By default, --read-write-cache is enabled.
+      The default CACHE_FILE is:
+          $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>_<SQUARE_MODE>.txt
+
+      --cache-file CACHE_FILE
+      --cache-file=CACHE_FILE
+        override CACHE_FILE for reading and writing
+        NOTE: Overriding the CACHE_FILE ignores fingerprint control options.
+              Do not use the same CACHE_FILE with different cmdline options.
+              (The default CACHE_FILE changes based on fingerprint control options.)
+
+      --no-cache
+        do not read or write CACHE_FILE
+        (always calculate all fingerprints)
+
+      --ro | --read-only-cache
+        allow read-only access to CACHE_FILE
+        (skip existing fingerprints, but do not cache newly calculated fingerprints)
+
+      --rw | --read-write-cache
+        allow read/write access to CACHE_FILE
+        (skip existing fingerprints, AND write newly calculated fingerprints)
+
     MISC
       --debug-dir DEBUG_DIR
       --debug-dir=DEBUG_DIR
@@ -146,6 +183,8 @@ sub main(@){
   my $colorSpace = $COLOR_MONO_1;
   my $squareMode = $SQUARE_MODE_PAD;
   my $thresholdPct = 95.0;
+  my $cacheMode = $CACHE_MODE_RW;
+  my $cacheFile = undef;
   my $debugDir = undef;
 
   my @files;
@@ -184,6 +223,16 @@ sub main(@){
     }elsif($arg =~ /^(-t|--threshold)$/ and @_ > 0 and $_[0]=~/^(\d+|\d*\.\d+)%?$/){
       $thresholdPct = $1;
       shift;
+    }elsif($arg =~ /^--cache-file=(.+)$/){
+      $cacheFile = $1;
+    }elsif($arg =~ /^(--cache-file)$/ and @_ > 0){
+      $cacheFile = shift;
+    }elsif($arg =~ /^(--no-cache)$/){
+      $cacheMode = $CACHE_MODE_NONE;
+    }elsif($arg =~ /^(--ro|--read-only-cache)$/){
+      $cacheMode = $CACHE_MODE_RO;
+    }elsif($arg =~ /^(--rw|--read-write-cache)$/){
+      $cacheMode = $CACHE_MODE_RW;
     }elsif($arg =~ /^--debug-dir=(.+)$/){
       $debugDir = $1;
     }elsif($arg =~ /^--debug-dir$/ and @_ > 0){
@@ -201,11 +250,26 @@ sub main(@){
     die "$USAGE\nERROR: unknown COLORSPACE $colorSpace\n";
   }
 
+  if(not defined $cacheFile){
+    if(not -d $CACHE_DIR and $cacheMode =~ /^($CACHE_MODE_RW)$/){
+      system "mkdir -p $CACHE_DIR";
+    }
+    if($cacheMode =~ /^($CACHE_MODE_RO|$CACHE_MODE_RW)$/){
+      $cacheFile = "$CACHE_DIR/${colorSpace}_${size}_${squareMode}.txt";
+    }
+  }
+
+  my $cache = undef;
+  if($cacheMode =~ /^($CACHE_MODE_RW|$CACHE_MODE_RO)$/){
+    $cache = readCache($cacheFile);
+  }
+
   my $fingerprints = {};
   my $GM = Graphics::Magick->new;
   for my $file(@files){
     my $fingerprint = eval {
-      fingerprint($GM, $file, $size, $colorSpace, $squareMode, $debugDir);
+      fetchFingerprint($GM, $file, $size, $colorSpace, $squareMode, $debugDir,
+        $cache, $cacheFile, $cacheMode);
     };
     if(not defined $fingerprint){
       print STDERR "WARNING: skipped $file\n";
@@ -276,7 +340,33 @@ sub fpCompare($$$){
   return 1 - $diff/$maxDiff;
 }
 
-sub fingerprint($$$$$$){
+sub fetchFingerprint($$$$$$$$$){
+  my ($GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir,
+    $cache, $cacheFile, $cacheMode) = @_;
+
+  if($cacheMode =~ /^($CACHE_MODE_RW|$CACHE_MODE_RO)$/){
+    my $absPath = abs_path $file;
+    my ($fsize, $mtime) = statFsizeMtime($absPath);
+    if(defined $$cache{$absPath}){
+      for my $cacheEntry(@{$$cache{$absPath}}){
+        if($$cacheEntry{fsize} eq $fsize and $$cacheEntry{mtime} eq $mtime){
+          return $$cacheEntry{fingerprint};
+        }
+      }
+    }
+    my $fp = calculateFingerprint(
+      $GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir);
+    if($cacheMode eq $CACHE_MODE_RW){
+      appendCache($cacheFile, $absPath, $fsize, $mtime, $fp);
+    }
+    return $fp;
+  }else{
+    return calculateFingerprint(
+      $GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir);
+  }
+}
+
+sub calculateFingerprint($$$$$$){
   my ($GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir) = @_;
 
   my $handleError = sub{
@@ -383,6 +473,52 @@ sub colorToBitStr($$){
   my ($colorVal, $bitCount) = @_;
   my $colorCount = 2**$bitCount;
   return sprintf "%0${bitCount}b", int($colorVal/(65536/$colorCount));
+}
+
+sub readCache($){
+  my ($cacheFile) = @_;
+  my $cache = {};
+  return $cache if not -f $cacheFile;
+
+  open FH, "< $cacheFile" or die "ERROR: could not read $cacheFile\n$!\n";
+  my @lines = <FH>;
+  close FH;
+
+  for my $line(@lines){
+    if($line =~ /^(\d+)\s+(\d+)\s+([0-9a-f]+)\s+(.+)$/){
+      my ($mtime, $fsize, $fp, $file) = ($1, $2, $3, $4);
+      $$cache{$file} = [] if not defined $$cache{$file};
+      push @{$$cache{$file}}, {
+        mtime       => $mtime,
+        fsize       => $fsize,
+        fingerprint => $fp,
+        file        => $file,
+      };
+    }else{
+      die "ERROR: invalid cache line in $cacheFile:\n$line";
+    }
+  }
+
+  return $cache;
+}
+sub appendCache($$$$$){
+  my ($cacheFile, $file, $fsize, $mtime, $fp) = @_;
+  my $cacheLine = sprintf "%s %10d %s %s\n", $mtime, $fsize, $fp, $file;
+
+  open FH, ">> $cacheFile" or die "ERROR: could not write $cacheFile\n$!\n";
+  print FH $cacheLine;
+  close FH;
+}
+
+sub statFsizeMtime($){
+  my ($file) = @_;
+  my @stat = stat $file;
+  my $fsize = $stat[7];
+  my $mtime = $stat[9];
+  if($fsize !~ /^\d+$/ or $mtime !~ /^\d+$/){
+    die "ERROR: could not read fsize/mtime from $file\n";
+  }
+  return ($fsize, $mtime);
 }
 
 sub nowMillis(){
