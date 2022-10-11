@@ -54,9 +54,9 @@ my $USAGE = "Usage:
       and print 'yes' or 'no' if SIMILARITY_PCT >= THRESHOLD_PCT
     default threshold is 95%
 
-  $0 [OPTS] --fingerprint IMG
-  $0 [OPTS] --fp          IMG
-  $0 [OPTS] IMG
+  $0 [OPTS] --fingerprint IMG IMG [IMG ..]
+  $0 [OPTS] --fp          IMG IMG [IMG ..]
+  $0 [OPTS] IMG IMG [IMG ..]
     calculate a 'fingerprint' image of IMG, and print the pixels as hex chars
       -(A) load image
       -(B) transform image
@@ -74,10 +74,6 @@ my $USAGE = "Usage:
       -(C) debug output - optionally write final image to a bmp
       -(D) extract pixel data as single bitstring (left-to-right, top-to-bottom)
       -(E) convert to hex
-
-  $0 [OPTS] IMG IMG [IMG ..]
-    find the FINGERPRINT of each IMG as in --fp
-    print \"FINGERPRINT IMG\" for each IMG
 
   OPTS
     FINGERPRINT SIZE
