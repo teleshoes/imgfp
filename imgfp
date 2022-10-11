@@ -272,7 +272,7 @@ sub main(@){
         $cache, $cacheFile, $cacheMode);
     };
     if(not defined $fingerprint){
-      print STDERR "WARNING: skipped $file\n";
+      print STDERR "WARNING: skipped $file\n$@\n";
     }
     $$fingerprints{$file} = $fingerprint;
   }
