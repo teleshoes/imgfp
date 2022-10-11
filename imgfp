@@ -13,9 +13,11 @@ use Time::HiRes qw(time);
 use Graphics::Magick;
 use File::MimeInfo::Magic qw(mimetype);
 
+sub fpCompare($$$);
 sub fingerprint($$$$$$);
 sub bitStrToHexStr($);
 sub colorToBitStr($$);
+sub nowMillis();
 
 my $COLOR_RGB_12  = "rgb12";
 my $COLOR_GRAY_4 = "gray4";
