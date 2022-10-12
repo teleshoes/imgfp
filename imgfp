@@ -15,8 +15,8 @@ use Graphics::Magick;
 use File::MimeInfo::Magic qw(mimetype);
 
 sub fpCompare($$$);
-sub fetchFingerprint($$$$$$$$$);
-sub calculateFingerprint($$$$$$);
+sub fetchFingerprint($$$$$$$$$$);
+sub calculateFingerprint($$$$$$$);
 sub bitStrToHexStr($);
 sub colorToBitStr($$);
 sub readCache($);
@@ -73,10 +73,10 @@ my $USAGE = "Usage:
     calculate a 'fingerprint' image of IMG, and print the pixels as hex chars
       -(A) load image
       -(B) transform image
-        -(B0) initial resize to 1024x1024, preserving aspect ratio
-              improves performance on large images
-              makes behavior more consistent
+        -(B0) if --quick, perform optional initial resize,
+              to improve performance of other image transforms
         -(B1) blur - blur the image with a radius of 1.5% the maximum dimension
+              (blur is ~80% of the fingerprint generation time)
         -(B2) normalize - modestly increase contrast by stretching intensity range
                 -find dark intensity that 2% of pixels are darker than
                 -find light intensity that 1% of pixels are whiter than
@@ -143,6 +143,29 @@ my $USAGE = "Usage:
         add a top/bottom or left/right black border to the fingerprint to fit in a square
         this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
 
+    PERFORMANCE
+      --quick
+        same as: --quick-resize=128
+
+      --no-quick
+        same as: --quick-resize=0
+        (this is the default)
+
+      --quick-resize=QUICK_RESIZE_PX
+      --quick-resize QUICK_RESIZE_PX
+        drastically increase performance with a moderate drop in accuracy,
+          by resizing image to <QUICK_RESIZE_PX>x<QUICK_RESIZE_PX> before blurring
+        smaller QUICK_RESIZE_PX leads to better performance and worse accuracy
+        if QUICK_RESIZE_PX is 0, do not perform resize
+          (this is the default)
+        include in cache filename:
+          QUICK_RESIZE_FMT = no-quick | quick<QUICK_RESIZE_PX>
+
+          e.g.:
+            --quick-resize=128 is very fast, and still somewhat accurate
+            --quick-resize=1024 is fast, and fairly accurate
+            --quick-resize=2048 does not improve performance, except for very large input images
+
     FINGERPRINT COMPARISON
       Control the threshold at which --match prints yes.
       The default is --threshold=95.0%
@@ -157,7 +180,7 @@ my $USAGE = "Usage:
       Files must match filesize, mtime, and absolute path, or they will be recalculated.
       By default, --read-write-cache is enabled.
       The default CACHE_FILE is:
-          $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>px_<SQUARE_MODE>.txt
+          $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>px_<SQUARE_MODE>_<QUICK_RESIZE_FMT>.txt
 
       --cache-file CACHE_FILE
       --cache-file=CACHE_FILE
@@ -189,6 +212,7 @@ sub main(@){
   my $size = 16;
   my $colorSpace = $COLOR_MONO_1;
   my $squareMode = $SQUARE_MODE_PAD;
+  my $quickResize = 0;
   my $thresholdPct = 95.0;
   my $cacheMode = $CACHE_MODE_RW;
   my $cacheFile = undef;
@@ -225,6 +249,15 @@ sub main(@){
       $squareMode = $SQUARE_MODE_STRETCH;
     }elsif($arg =~ /^(--pad|--keep-aspect-ratio)$/){
       $squareMode = $SQUARE_MODE_PAD;
+    }elsif($arg =~ /^(--quick)$/){
+      $quickResize = 128;
+    }elsif($arg =~ /^(--no-quick)$/){
+      $quickResize = 0;
+    }elsif($arg =~ /^(?:--quick-resize)=(\d+)$/){
+      $quickResize = $1;
+    }elsif($arg =~ /^(?:--quick-resize)$/ and @_ > 0 and $_[0] =~ /^(\d+)$/){
+      $quickResize = $1;
+      shift;
     }elsif($arg =~ /^--threshold=(\d+|\d*\.\d+)%?$/){
       $thresholdPct = $1;
     }elsif($arg =~ /^(-t|--threshold)$/ and @_ > 0 and $_[0]=~/^(\d+|\d*\.\d+)%?$/){
@@ -260,6 +293,8 @@ sub main(@){
     }
   }
 
+  $quickResize = undef if $quickResize <= 0;
+
   if(@files == 0){
     die "$USAGE\nERROR: no files given\n";
   }elsif(not defined $$QUANTIZE_PARAMS{$colorSpace}){
@@ -271,7 +306,8 @@ sub main(@){
       system "mkdir -p $CACHE_DIR";
     }
     if($cacheMode =~ /^($CACHE_MODE_RO|$CACHE_MODE_RW)$/){
-      $cacheFile = "$CACHE_DIR/${colorSpace}_${size}px_${squareMode}.txt";
+      my $quickResizeFmt = defined $quickResize ? "quick$quickResize" : "no-quick";
+      $cacheFile = "$CACHE_DIR/${colorSpace}_${size}px_${squareMode}_${quickResizeFmt}.txt";
     }
   }
 
@@ -284,7 +320,7 @@ sub main(@){
   my $GM = Graphics::Magick->new;
   for my $file(@files){
     my $fingerprint = eval {
-      fetchFingerprint($GM, $file, $size, $colorSpace, $squareMode, $debugDir,
+      fetchFingerprint($GM, $file, $size, $colorSpace, $squareMode, $quickResize, $debugDir,
         $cache, $cacheFile, $cacheMode);
     };
     if(not defined $fingerprint){
@@ -360,8 +396,8 @@ sub fpCompare($$$){
   return 1 - $diff/$maxDiff;
 }
 
-sub fetchFingerprint($$$$$$$$$){
-  my ($GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir,
+sub fetchFingerprint($$$$$$$$$$){
+  my ($GM, $file, $squareSize, $colorSpace, $squareMode, $quickResize, $debugOutputDir,
     $cache, $cacheFile, $cacheMode) = @_;
 
   if($cacheMode =~ /^($CACHE_MODE_RW|$CACHE_MODE_RO)$/){
@@ -375,19 +411,19 @@ sub fetchFingerprint($$$$$$$$$){
       }
     }
     my $fp = calculateFingerprint(
-      $GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir);
+      $GM, $file, $squareSize, $colorSpace, $squareMode, $quickResize, $debugOutputDir);
     if($cacheMode eq $CACHE_MODE_RW){
       appendCache($cacheFile, $absPath, $fsize, $mtime, $fp);
     }
     return $fp;
   }else{
     return calculateFingerprint(
-      $GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir);
+      $GM, $file, $squareSize, $colorSpace, $squareMode, $quickResize, $debugOutputDir);
   }
 }
 
-sub calculateFingerprint($$$$$$){
-  my ($GM, $file, $squareSize, $colorSpace, $squareMode, $debugOutputDir) = @_;
+sub calculateFingerprint($$$$$$$){
+  my ($GM, $file, $squareSize, $colorSpace, $squareMode, $quickResize, $debugOutputDir) = @_;
 
   my $handleError = sub{
     if($_[0]){
@@ -401,15 +437,17 @@ sub calculateFingerprint($$$$$$){
 
   #(B) transform image
 
-  #  (B0) initial resize to 1024x1024, preserving aspect ratio
-  #       improves performance on large images
-  #       makes behavior more consistent
-  &$handleError($GM->Sample("1024x1024"));
+  #  (B0) if --quick, perform optional initial resize,
+  #        to improve performance of other image transforms
+  if(defined $quickResize){
+    &$handleError($GM->Sample("${quickResize}x${quickResize}"));
+  }
 
   my $w = $GM->Get('width');
   my $h = $GM->Get('height');
 
   #  (B1) blur - gaussian blur with a radius of 1.5% the maximum dimension
+  #       (blur is ~80% of the fingerprint generation time)
   my $radius = $w > $h ? int(1.5 * $w/100) : int(1.5 * $h/100);
   $radius = 3 if $radius < 3;
   &$handleError($GM->Blur(radius=>$radius, sigma=>60));
