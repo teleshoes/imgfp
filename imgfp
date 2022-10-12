@@ -73,6 +73,9 @@ my $USAGE = "Usage:
     calculate a 'fingerprint' image of IMG, and print the pixels as hex chars
       -(A) load image
       -(B) transform image
+        -(B0) initial resize to 1024x1024, preserving aspect ratio
+              improves performance on large images
+              makes behavior more consistent
         -(B1) blur - blur the image with a radius of 1.5% the maximum dimension
         -(B2) normalize - modestly increase contrast by stretching intensity range
                 -find dark intensity that 2% of pixels are darker than
@@ -395,10 +398,17 @@ sub calculateFingerprint($$$$$$){
   #(A) clear previous image and load new
   @$GM = ();
   &$handleError($GM->Read($file));
+
+  #(B) transform image
+
+  #  (B0) initial resize to 1024x1024, preserving aspect ratio
+  #       improves performance on large images
+  #       makes behavior more consistent
+  &$handleError($GM->Sample("1024x1024"));
+
   my $w = $GM->Get('width');
   my $h = $GM->Get('height');
 
-  #(B) transform image
   #  (B1) blur - gaussian blur with a radius of 1.5% the maximum dimension
   my $radius = $w > $h ? int(1.5 * $w/100) : int(1.5 * $h/100);
   $radius = 3 if $radius < 3;
