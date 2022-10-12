@@ -157,7 +157,7 @@ my $USAGE = "Usage:
       Files must match filesize, mtime, and absolute path, or they will be recalculated.
       By default, --read-write-cache is enabled.
       The default CACHE_FILE is:
-          $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>_<SQUARE_MODE>.txt
+          $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>px_<SQUARE_MODE>.txt
 
       --cache-file CACHE_FILE
       --cache-file=CACHE_FILE
@@ -271,7 +271,7 @@ sub main(@){
       system "mkdir -p $CACHE_DIR";
     }
     if($cacheMode =~ /^($CACHE_MODE_RO|$CACHE_MODE_RW)$/){
-      $cacheFile = "$CACHE_DIR/${colorSpace}_${size}_${squareMode}.txt";
+      $cacheFile = "$CACHE_DIR/${colorSpace}_${size}px_${squareMode}.txt";
     }
   }
 
