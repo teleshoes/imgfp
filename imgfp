@@ -65,7 +65,7 @@ my $USAGE = "Usage:
 
   $0 [OPTS] --compare IMG_SRC IMG_COMP [IMG_COMP ..]
   $0 [OPTS] --diff    IMG_SRC IMG_COMP [IMG_COMP ..]
-  $0 [OPTS] -d       IMG_SRC IMG_COMP [IMG_COMP ..]
+  $0 [OPTS] -d        IMG_SRC IMG_COMP [IMG_COMP ..]
     find the SIMILARITY_PCT between the fingerprints of IMG_SRC and IMG_COMP
       -calculate the fingerprints of IMG_SRC and each IMG_COMP as in --fp
       -sum the absolute difference of each channel (RGB or gray) of each pixel
