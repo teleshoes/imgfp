@@ -743,7 +743,9 @@ sub calculateFingerprint($$$$$$$){
     }
   }
   #fill last hex char for odd-sized black-and-white squares
-  $bitStr .= '0' x (length($bitStr) % 4);
+  if(length($bitStr) % 4 > 0){
+    $bitStr .= '0' x (4 - length($bitStr)%4);
+  }
 
   #(E) convert to hex
   my $hexStr = bitStrToHexStr($bitStr);
