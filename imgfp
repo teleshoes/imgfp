@@ -47,6 +47,7 @@ my $MODE_COMPARE = "compare";
 my $MODE_MATCH = "match";
 my $MODE_FIND_DUPES = "find-dupes";
 my $MODE_FINGERPRINT = "fingerprint";
+my $MODE_TEST = "test";
 
 my $DUPE_FORMAT_INDEX = "index";
 my $DUPE_FORMAT_ONELINE = "oneline";
@@ -122,6 +123,16 @@ my $USAGE = "Usage:
       -(C) debug output - optionally write final image to a bmp
       -(D) extract pixel data as single bitstring (left-to-right, top-to-bottom)
       -(E) convert to hex
+
+  $0 [OPTS] --test DIR [DIR ..]
+    compare groups of known-similar images, organized in directories
+    -for each DIR:
+      -compare each IMG file in same DIR to each other as in --compare
+        -take the minimum value as MIN_MATCH_PCT
+      -for each other dir OTHER_DIR
+        -compare each IMG file in DIR to IMG files in OTHER_DIR as in --compare
+        -take the maximum value for each dir as MAX_MISMATCH_PCT
+      -print DIR: MIN_MATCH_PCT | MAX_MISMATCH_PCT MAX_MISMATCH_PCT ..
 
   IMAGE_FILE = IMG_SRC | IMG_COMP | IMG
     path to a visual image file
@@ -266,6 +277,7 @@ sub main(@){
   my $debugDir = undef;
 
   my @files;
+  my @dirs;
   while(@_ > 0){
     my $arg = shift;
     if($arg =~ /^(-h|--help)$/){
@@ -283,6 +295,8 @@ sub main(@){
       $dupeFmt = $DUPE_FORMAT_ONELINE;
     }elsif($arg =~ /^(--fingerprint|--fp)$/){
       $mode = $MODE_FINGERPRINT;
+    }elsif($arg =~ /^(--test)$/){
+      $mode = $MODE_TEST;
     }elsif($arg =~ /^(--good)$/){
       $colorSpace = $COLOR_RGB_12;
       $size = 32;
@@ -353,6 +367,8 @@ sub main(@){
       }
     }elsif(-f $arg){
       push @files, $arg;
+    }elsif(-d $arg){
+      push @dirs, $arg;
     }else{
       die "$USAGE\nERROR: unknown arg $arg\n";
     }
@@ -360,8 +376,10 @@ sub main(@){
 
   $quickResize = undef if $quickResize <= 0;
 
-  if(@files == 0){
+  if(@files == 0 and $mode ne $MODE_TEST){
     die "$USAGE\nERROR: no files given\n";
+  }elsif(@dirs > 0 and $mode ne $MODE_TEST){
+    die "$USAGE\nERROR: DIR args not allowed for mode $mode\n";
   }elsif(not defined $$QUANTIZE_PARAMS{$colorSpace}){
     die "$USAGE\nERROR: unknown COLORSPACE $colorSpace\n";
   }
@@ -470,6 +488,78 @@ sub main(@){
           die "ERROR: unknown dupe format $dupeFmt\n";
         }
       }
+    }
+  }elsif($mode eq $MODE_TEST){
+    my ($start, $end);
+    print "generating fingerprints for all files\n";
+    $start = nowMillis();
+    my %imgFilesByDir;
+    my %allImgFiles;
+    for my $dir(@dirs){
+      my @imgFiles = grep {-f $_} glob "$dir/*";
+      $imgFilesByDir{$dir} = [@imgFiles];
+      for my $file(@imgFiles){
+        next if defined $$fingerprints{$file};
+        my $fp = fetchFingerprint(
+          $GM, $file, $size, $colorSpace, $squareMode, $quickResize, $debugDir,
+          $cache, $cacheFile, $cacheMode);
+        $$fingerprints{$file} = $fp;
+        $allImgFiles{$file} = 1;
+      }
+    }
+    $end = nowMillis();
+    printf "elapsed: %.2fs\n", ($end-$start)/1000.0;
+
+    print "generating comparison for each pair of files\n";
+    $start = nowMillis();
+    my %simPcts;
+    my @sortedImgFiles = sort keys %allImgFiles;
+    for(my $i=0; $i<@sortedImgFiles; $i++){
+      for(my $j=$i+1; $j<@sortedImgFiles; $j++){
+        my $file1 = $sortedImgFiles[$i];
+        my $file2 = $sortedImgFiles[$j];
+        my $fp1 = $$fingerprints{$file1};
+        my $fp2 = $$fingerprints{$file2};
+        my $pct = 100.0 * fpCompare($fp1, $fp2, $colorSpace);
+        $simPcts{$file1} = {} if not defined $simPcts{$file1};
+        $simPcts{$file2} = {} if not defined $simPcts{$file2};
+        $simPcts{$file1}{$file2} = $pct;
+        $simPcts{$file2}{$file1} = $pct;
+      }
+    }
+    $end = nowMillis();
+    printf "elapsed: %.2fs\n", ($end-$start)/1000.0;
+
+    print "\n";
+    for my $dir(@dirs){
+      my $fmt = "$dir:";
+      my @imgFiles = @{$imgFilesByDir{$dir}};
+      my $minPct = undef;
+      for my $srcImg(@imgFiles){
+        for my $compImg(@imgFiles){
+          next if $srcImg eq $compImg;
+          my $pct = $simPcts{$srcImg}{$compImg};
+          $minPct = $pct if not defined $minPct or $pct < $minPct;
+        }
+      }
+      $fmt .= sprintf " %6.2f |",  $minPct;
+
+      for my $otherDir(@dirs){
+        next if $dir eq $otherDir;
+        my $maxPct = undef;
+        my @otherDirImgFiles = @{$imgFilesByDir{$otherDir}};
+        for my $srcImg(@imgFiles){
+          for my $compImg(@otherDirImgFiles){
+            next if $srcImg eq $compImg;
+            my $pct = $simPcts{$srcImg}{$compImg};
+            $maxPct = $pct if not defined $maxPct or $pct > $minPct;
+          }
+        }
+        $fmt .= sprintf " %6.2f",  $maxPct;
+      }
+      $fmt .= "\n";
+
+      print $fmt;
     }
   }else{
     die "ERROR: unknown mode $mode\n";
