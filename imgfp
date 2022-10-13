@@ -195,12 +195,19 @@ my $USAGE = "Usage:
       The default is --pad
 
       --stretch | --ignore-aspect-ratio
-        stretch the fingerprint (with pixel sampling) to fit in a square
-        this ensures that changing the aspect ratio of an image has SMALL impact on fingerprint
+        same as: --square-mode=stretch
 
       --pad | --keep-aspect-ratio
-        add a top/bottom or left/right black border to the fingerprint to fit in a square
-        this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
+        same as: --square-mode=pad
+
+      --square-mode=SQUARE_MODE
+        SQUARE_MODE=pad
+          add a top/bottom or left/right black border to the fingerprint to fit in a square
+          this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
+
+        SQUARE_MODE=stretch
+          stretch the fingerprint (with pixel sampling) to fit in a square
+          this ensures that changing the aspect ratio of an image has SMALL impact on fingerprint
 
     PERFORMANCE
       Control whether to initially resize the image before performing transformations.
@@ -329,6 +336,10 @@ sub main(@){
       $colorSpace = $COLOR_GRAY_4;
     }elsif($arg =~ /^(--mono|--bw)$/){
       $colorSpace = $COLOR_MONO_1;
+    }elsif($arg =~ /^--square-mode$/ and @_ > 0){
+      $squareMode = shift;
+    }elsif($arg =~ /^--square-mode=(.+)$/){
+      $squareMode = $1;
     }elsif($arg =~ /^(--stretch|--ignore-aspect-ratio)$/){
       $squareMode = $SQUARE_MODE_STRETCH;
     }elsif($arg =~ /^(--pad|--keep-aspect-ratio)$/){
@@ -387,6 +398,8 @@ sub main(@){
     die "$USAGE\nERROR: DIR args not allowed for mode $mode\n";
   }elsif(not defined $$QUANTIZE_PARAMS{$colorSpace}){
     die "$USAGE\nERROR: unknown COLORSPACE $colorSpace\n";
+  }elsif($squareMode !~ /^($SQUARE_MODE_PAD|$SQUARE_MODE_STRETCH)$/){
+    die "$USAGE\nERROR: unknown SQUARE_MODE $squareMode\n";
   }
 
   if(not defined $cacheFile){
