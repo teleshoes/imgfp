@@ -203,12 +203,15 @@ my $USAGE = "Usage:
         this ensures that changing the aspect ratio of an image has a LARGE impact on fingerprint
 
     PERFORMANCE
+      Control whether to initially resize the image before performing transformations.
+      Blur in particular is very slow on larger images.
+      The default is --no-quick
+
       --quick
         same as: --quick-resize=128
 
       --no-quick
         same as: --quick-resize=0
-        (this is the default)
 
       --quick-resize=QUICK_RESIZE_PX
       --quick-resize QUICK_RESIZE_PX
