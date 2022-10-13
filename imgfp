@@ -45,7 +45,11 @@ my $CACHE_MODE_NONE = "none";
 
 my $MODE_COMPARE = "compare";
 my $MODE_MATCH = "match";
+my $MODE_FIND_DUPES = "find-dupes";
 my $MODE_FINGERPRINT = "fingerprint";
+
+my $DUPE_FORMAT_INDEX = "index";
+my $DUPE_FORMAT_ONELINE = "oneline";
 
 my $USAGE = "Usage:
   $0 -h | --help
@@ -67,9 +71,37 @@ my $USAGE = "Usage:
       and print 'yes' or 'no' if SIMILARITY_PCT >= THRESHOLD_PCT
     default threshold is 95%
 
-  $0 [OPTS] --fingerprint IMG IMG [IMG ..]
-  $0 [OPTS] --fp          IMG IMG [IMG ..]
-  $0 [OPTS] IMG IMG [IMG ..]
+  $0 [OPTS] --find-dupes IMG IMG [IMG ..]
+    print matching IMG filesets as in --match,
+      formatted as one IMG file per line, prefixed with a matching group index
+    -for each IMG:
+      -use IMG as IMG_SRC
+      -assign MATCH_GROUP_INDEX based on IMG_SRC position in file list, starting with 1
+      -use all remaining IMG args (not used as IMG_SRC yet) as IMG_COMP
+      -perform --match with IMG_SRC and each IMG_COMP
+      -if matches are found for at least one IMG_COMP, print:
+         MATCH_GROUP_INDEX:IMG_SRC
+         MATCH_GROUP_INDEX:IMG_COMP
+         MATCH_GROUP_INDEX:IMG_COMP
+         ...
+      -otherwise, print nothing
+    e.g.: --find-dupes a1.jpg a2.jpg b1.jpg c1.jpg a3.jpg b2.jpg d1.jpg
+            1:a1.jpg
+            1:a2.jpg
+            1:a3.jpg
+            3:b1.jpg
+            3:b2.jpg
+
+  $0 [OPTS] --find-dupes-oneline IMG IMG [IMG ..]
+    same as --find-dupes, except print each matching group on a single line,
+    with a space character separating each IMG, and not MATCH_GROUP_INDEX
+    e.g.: --find-image-dupes a1.jpg a2.jpg b1.jpg c1.jpg a3.jpg b2.jpg d1.jpg
+            a1.jpg a2.jpg a3.jpg
+            b1.jpg b2.jpg
+
+  $0 [OPTS] --fingerprint IMG [IMG ..]
+  $0 [OPTS] --fp          IMG [IMG ..]
+  $0 [OPTS] IMG [IMG ..]
     calculate a 'fingerprint' image of IMG, and print the pixels as hex chars
       -(A) load image
       -(B) transform image
@@ -209,6 +241,7 @@ my $USAGE = "Usage:
 
 sub main(@){
   my $mode = $MODE_FINGERPRINT;
+  my $dupeFmt = $DUPE_FORMAT_INDEX;
   my $size = 16;
   my $colorSpace = $COLOR_MONO_1;
   my $squareMode = $SQUARE_MODE_PAD;
@@ -228,6 +261,12 @@ sub main(@){
       $mode = $MODE_COMPARE;
     }elsif($arg =~ /^(--match|--matches|-m)$/){
       $mode = $MODE_MATCH;
+    }elsif($arg =~ /^(--find-dupes)$/){
+      $mode = $MODE_FIND_DUPES;
+      $dupeFmt = $DUPE_FORMAT_INDEX;
+    }elsif($arg =~ /^(--find-dupes-oneline)$/){
+      $mode = $MODE_FIND_DUPES;
+      $dupeFmt = $DUPE_FORMAT_ONELINE;
     }elsif($arg =~ /^(--fingerprint|--fp)$/){
       $mode = $MODE_FINGERPRINT;
     }elsif($arg =~ /^(?:-s|--size|--square-size)=(\d+)$/){
@@ -365,6 +404,44 @@ sub main(@){
           print "$res\n";
         }else{
           printf "%3s %s\n", $res, $compFile;
+        }
+      }
+    }
+  }elsif($mode eq $MODE_FIND_DUPES){
+    my %matched;
+    for(my $i=0; $i<@files; $i++){
+      my $matchGroupIndex = $i+1;
+      my $srcFile = $files[$i];
+      my @compFiles = @files[$i+1..$#files];
+
+      #allow each file specified to appear at most once
+      next if $matched{$srcFile};
+      @compFiles = grep {not defined $matched{$_}} @compFiles;
+
+      my $srcFP = $$fingerprints{$srcFile};
+
+      my @matches;
+      for my $compFile(@compFiles){
+        my $compFP = $$fingerprints{$compFile};
+        my $pct;
+        if(not defined $srcFP or not defined $compFP){
+          $pct = 0;
+        }else{
+          $pct = 100.0 * fpCompare($srcFP, $compFP, $colorSpace);
+        }
+        if($pct >= $thresholdPct){
+          push @matches, $compFile;
+          $matched{$compFile} = 1;
+        }
+      }
+      if(@matches > 0){
+        my @group = ($srcFile, @matches);
+        if($dupeFmt eq $DUPE_FORMAT_INDEX){
+          print "$matchGroupIndex:$_\n" foreach @group;
+        }elsif($dupeFmt eq $DUPE_FORMAT_ONELINE){
+          print "@group\n";
+        }else{
+          die "ERROR: unknown dupe format $dupeFmt\n";
         }
       }
     }
