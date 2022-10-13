@@ -14,7 +14,7 @@ use Time::HiRes qw(time);
 use Graphics::Magick;
 use File::MimeInfo::Magic qw(mimetype);
 
-sub fpCompare($$$);
+sub fpComparePct($$$);
 sub fetchFingerprint($$$$$$$$$$);
 sub calculateFingerprint($$$$$$$);
 sub bitStrToHexStr($);
@@ -457,12 +457,7 @@ sub main(@){
     my $srcFP = $$fingerprints{$srcFile};
     for my $compFile(@compFiles){
       my $compFP = $$fingerprints{$compFile};
-      my $pct;
-      if(not defined $srcFP or not defined $compFP){
-        $pct = 0;
-      }else{
-        $pct = 100.0 * fpCompare($srcFP, $compFP, $colorSpace);
-      }
+      my $pct = fpComparePct($srcFP, $compFP, $colorSpace);
       if($mode eq $MODE_COMPARE){
         if(@compFiles == 1){
           printf "%.2f\n", $pct;
@@ -494,12 +489,7 @@ sub main(@){
       my @matches;
       for my $compFile(@compFiles){
         my $compFP = $$fingerprints{$compFile};
-        my $pct;
-        if(not defined $srcFP or not defined $compFP){
-          $pct = 0;
-        }else{
-          $pct = 100.0 * fpCompare($srcFP, $compFP, $colorSpace);
-        }
+        my $pct = fpComparePct($srcFP, $compFP, $colorSpace);
         if($pct >= $thresholdPct){
           push @matches, $compFile;
           $matched{$compFile} = 1;
@@ -547,7 +537,7 @@ sub main(@){
         my $file2 = $sortedImgFiles[$j];
         my $fp1 = $$fingerprints{$file1};
         my $fp2 = $$fingerprints{$file2};
-        my $pct = 100.0 * fpCompare($fp1, $fp2, $colorSpace);
+        my $pct = fpComparePct($fp1, $fp2, $colorSpace);
         $simPcts{$file1} = {} if not defined $simPcts{$file1};
         $simPcts{$file2} = {} if not defined $simPcts{$file2};
         $simPcts{$file1}{$file2} = $pct;
@@ -593,8 +583,12 @@ sub main(@){
   }
 }
 
-sub fpCompare($$$){
+sub fpComparePct($$$){
   my ($fp1, $fp2, $colorSpace) = @_;
+  if(not defined $fp1 or not defined $fp2){
+    return 0;
+  }
+
   my $maxDiff = length($fp1) * ($colorSpace eq $COLOR_MONO_1 ? 4 : 15);
 
   my $diff = 0;
@@ -627,7 +621,7 @@ sub fpCompare($$$){
       $diff += $colorDiff;
     }
   }
-  return 1 - $diff/$maxDiff;
+  return 100.0 * (1 - $diff/$maxDiff);
 }
 
 sub fetchFingerprint($$$$$$$$$$){
