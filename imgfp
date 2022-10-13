@@ -128,6 +128,20 @@ my $USAGE = "Usage:
     if '--' is given, read files, one per line, from STDIN
 
   OPTS
+    PRESETS
+      --good
+        same as: --rgb --size=32 --quick
+          PROS: very accurate, moderately fast to generate fingerprints
+          CONS: large cache disk space, slow to compare to many files
+      --slow
+        same as: --rgb --size=64
+          PROS: extremely accurate
+          CONS: very slow, large cache disk space
+      --fast
+        same as: --mono --size=16 --quick --threshold=90
+          PROS: very fast, very small cache disk space
+          CONS: moderate accuracy
+
     FINGERPRINT SIZE
       Control the height and width of the fingerprint image square.
       The length, in characters, of the hex fingerprint is:
@@ -269,6 +283,18 @@ sub main(@){
       $dupeFmt = $DUPE_FORMAT_ONELINE;
     }elsif($arg =~ /^(--fingerprint|--fp)$/){
       $mode = $MODE_FINGERPRINT;
+    }elsif($arg =~ /^(--good)$/){
+      $colorSpace = $COLOR_RGB_12;
+      $size = 32;
+      $quickResize = 128;
+    }elsif($arg =~ /^(--slow)$/){
+      $colorSpace = $COLOR_RGB_12;
+      $size = 64;
+    }elsif($arg =~ /^(--fast)$/){
+      $colorSpace = $COLOR_MONO_1;
+      $size = 16;
+      $quickResize = 128;
+      $thresholdPct = 90.0;
     }elsif($arg =~ /^(?:-s|--size|--square-size)=(\d+)$/){
       $size = $1;
     }elsif($arg =~ /^(?:--size|--square-size)$/ and @_ > 0 and $_[0]=~ /^(\d+)$/){
