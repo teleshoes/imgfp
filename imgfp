@@ -52,6 +52,14 @@ my $MODE_TEST = "test";
 my $DUPE_FORMAT_INDEX = "index";
 my $DUPE_FORMAT_ONELINE = "oneline";
 
+my $DEFAULT_COLORSPACE = $COLOR_MONO_1;
+my $DEFAULT_SQUARE_SIZE = 16;
+my $DEFAULT_SQUARE_MODE = $SQUARE_MODE_PAD;
+my $DEFAULT_CACHE_MODE = $CACHE_MODE_RW;
+my $DEFAULT_MODE = $MODE_FINGERPRINT;
+my $DEFAULT_THRESHOLD_PCT = 95;
+my $DEFAULT_QUICK_RESIZE = 0;
+
 my $USAGE = "Usage:
   $0 -h | --help
     show this message
@@ -70,7 +78,7 @@ my $USAGE = "Usage:
   $0 [OPTS] -m        IMG_SRC IMG_COMP [IMG_COMP ..]
     for each IMG_COMP, get the SIMILARITY_PCT with IMG_SRC as in --compare,
       and print 'yes' or 'no' if SIMILARITY_PCT >= THRESHOLD_PCT
-    default threshold is 95%
+    default threshold is $DEFAULT_THRESHOLD_PCT%
 
   $0 [OPTS] --find-dupes IMG IMG [IMG ..]
     print matching IMG filesets as in --match,
@@ -159,7 +167,7 @@ my $USAGE = "Usage:
       Control the height and width of the fingerprint image square.
       The length, in characters, of the hex fingerprint is:
         SQUARE_SIZE^2 * COLORSPACE_BITS / 4
-      The default is --size=16
+      The default is --size=$DEFAULT_SQUARE_SIZE
 
       -s SQUARE_SIZE | --size SQUARE_SIZE | --square-size SQUARE_SIZE
       --size=SQUARE_SIZE | --square-size=SQUARE_SIZE
@@ -168,7 +176,7 @@ my $USAGE = "Usage:
 
     FINGERPRINT COLORSPACE
       Control the number of bits per pixel in the fingerprint.
-      The default is --mono
+      The default is $DEFAULT_COLORSPACE
 
       --rgb | --color
         same as: --colorspace=rgb12
@@ -192,7 +200,7 @@ my $USAGE = "Usage:
 
     FINGERPRINT ASPECT RATIO
       Control whether a changed aspect ratio affects the fingerprint.
-      The default is --pad
+      The default is SQUARE_MODE=$DEFAULT_SQUARE_MODE
 
       --stretch | --ignore-aspect-ratio
         same as: --square-mode=stretch
@@ -212,7 +220,8 @@ my $USAGE = "Usage:
     PERFORMANCE
       Control whether to initially resize the image before performing transformations.
       Blur in particular is very slow on larger images.
-      The default is --no-quick
+      The default is QUICK_RESIZE_PX=$DEFAULT_QUICK_RESIZE" .
+         ($DEFAULT_QUICK_RESIZE > 0 ? "" : " (--no-quick)") . "
 
       --quick
         same as: --quick-resize=128
@@ -226,7 +235,6 @@ my $USAGE = "Usage:
           by resizing image to <QUICK_RESIZE_PX>x<QUICK_RESIZE_PX> before blurring
         smaller QUICK_RESIZE_PX leads to better performance and worse accuracy
         if QUICK_RESIZE_PX is 0, do not perform resize
-          (this is the default)
         include in cache filename:
           QUICK_RESIZE_FMT = no-quick | quick<QUICK_RESIZE_PX>
 
@@ -237,7 +245,7 @@ my $USAGE = "Usage:
 
     FINGERPRINT COMPARISON
       Control the threshold at which --match prints yes.
-      The default is --threshold=95.0%
+      The default is --threshold=$DEFAULT_THRESHOLD_PCT%
 
       -t THRESHOLD_PCT | --threshold THRESHOLD_PCT
       --threshold=THRESHOLD_PCT
@@ -247,7 +255,7 @@ my $USAGE = "Usage:
     FINGERPRINT CACHE
       Cache fingerprints in CACHE_FILE to improve performance of future calls.
       Files must match filesize, mtime, and absolute path, or they will be recalculated.
-      By default, --read-write-cache is enabled.
+      The default cache mode is $DEFAULT_CACHE_MODE
       The default CACHE_FILE changes with fingerprint params:
           $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>px_<SQUARE_MODE>_<QUICK_RESIZE_FMT>.txt
 
@@ -278,14 +286,14 @@ my $USAGE = "Usage:
 ";
 
 sub main(@){
-  my $mode = $MODE_FINGERPRINT;
-  my $dupeFmt = $DUPE_FORMAT_INDEX;
-  my $size = 16;
-  my $colorSpace = $COLOR_MONO_1;
-  my $squareMode = $SQUARE_MODE_PAD;
-  my $quickResize = 0;
-  my $thresholdPct = 95.0;
-  my $cacheMode = $CACHE_MODE_RW;
+  my $mode = $DEFAULT_MODE;
+  my $dupeFmt = undef;
+  my $size = $DEFAULT_SQUARE_SIZE;
+  my $colorSpace = $DEFAULT_COLORSPACE;
+  my $squareMode = $DEFAULT_SQUARE_MODE;
+  my $quickResize = $DEFAULT_QUICK_RESIZE;
+  my $thresholdPct = $DEFAULT_THRESHOLD_PCT;
+  my $cacheMode = $DEFAULT_CACHE_MODE;
   my $cacheFile = undef;
   my $debugDir = undef;
 
