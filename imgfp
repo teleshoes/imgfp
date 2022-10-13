@@ -598,17 +598,31 @@ sub fpCompare($$$){
   my $maxDiff = length($fp1) * ($colorSpace eq $COLOR_MONO_1 ? 4 : 15);
 
   my $diff = 0;
-  for(my $i=0; $i<length $fp1; $i++){
-    my $h1 = oct("0x" . substr($fp1, $i, 1));
-    my $h2 = oct("0x" . substr($fp2, $i, 1));
-    if($colorSpace eq $COLOR_MONO_1){
-      my $b1 = sprintf ("%04b", $h1);
-      my $b2 = sprintf ("%04b", $h2);
-      for(my $i=0; $i<4; $i++){
-        $diff += 1 if substr($b1, $i, 1) ne substr($b2, $i, 1);
-      }
-    }else{
-      my $colorDiff = $h2 - $h1;
+  if($colorSpace eq $COLOR_MONO_1){
+    #number of different pixels
+    #  sum of 1s in bitwise xor, up to 4 bytes at a time
+    for(my $i=0; $i<length $fp1; $i+=8){
+      my $hex1 = substr($fp1, $i, 8);
+      my $hex2 = substr($fp2, $i, 8);
+      my $val1 = oct("0x$hex1");
+      my $val2 = oct("0x$hex2");
+
+      my $xor = $val1 ^ $val2;
+      my $xorBits = sprintf("%b", $xor);
+      my $diffCount = $xorBits =~ tr/1/1/;
+      $diff += $diffCount;
+    }
+  }else{
+    #sum of the difference of each color in each pixel
+    #  each hex char is 1 color channel of 1 pixel
+    #  sum the absolute difference between each hex char
+    for(my $i=0; $i<length $fp1; $i++){
+      my $hex1 = substr($fp1, $i, 1);
+      my $hex2 = substr($fp2, $i, 1);
+      my $val1 = oct("0x$hex1");
+      my $val2 = oct("0x$hex2");
+
+      my $colorDiff = $val2 - $val1;
       $colorDiff = 0-$colorDiff if $colorDiff < 0;
       $diff += $colorDiff;
     }
