@@ -120,6 +120,8 @@ my $USAGE = "Usage:
                 -if set, ensures that stretching the image affects the fingerprint
         -(B5) resize - resize image to a (small) square with pixel sampling
         -(B6) quantize - reduce colorspace to 12-bit-rgb/4-bit-gray/1-bit-mono
+                -for --mono, first threshold the pixels at 50% intensity range
+                -then quantize using the ImageMagick quantize algorithm
       -(C) debug output - optionally write final image to a bmp
       -(D) extract pixel data as single bitstring (left-to-right, top-to-bottom)
       -(E) convert to hex
@@ -667,6 +669,10 @@ sub calculateFingerprint($$$$$$$){
   &$handleError($GM->Sample("${squareSize}x${squareSize}!"));
 
   #  (B6) quantize - reduce colorspace to 12-bit-rgb/4-bit-gray/1-bit-mono
+  if($colorSpace eq $COLOR_MONO_1){
+    #enormously improves accuracy of monochrome images
+    &$handleError($GM->Threshold(threshold=>"50%"));
+  }
   &$handleError($GM->Quantize(%{$$QUANTIZE_PARAMS{$colorSpace}}));
 
   #(C) debug output - optionally write final image to a bmp
