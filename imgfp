@@ -12,7 +12,6 @@ use warnings;
 use Cwd 'abs_path';
 use Time::HiRes qw(time);
 use Graphics::Magick;
-use File::MimeInfo::Magic qw(mimetype);
 
 sub fpComparePct($$$);
 sub fetchFingerprint($$$$$$$$$$);
