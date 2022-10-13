@@ -248,15 +248,16 @@ my $USAGE = "Usage:
       Cache fingerprints in CACHE_FILE to improve performance of future calls.
       Files must match filesize, mtime, and absolute path, or they will be recalculated.
       By default, --read-write-cache is enabled.
-      The default CACHE_FILE is:
+      The default CACHE_FILE changes with fingerprint params:
           $CACHE_DIR/<COLORSPACE>_<SQUARE_SIZE>px_<SQUARE_MODE>_<QUICK_RESIZE_FMT>.txt
 
       --cache-file CACHE_FILE
       --cache-file=CACHE_FILE
         override CACHE_FILE for reading and writing
-        NOTE: Overriding the CACHE_FILE ignores fingerprint control options.
-              Do not use the same CACHE_FILE with different cmdline options.
-              (The default CACHE_FILE changes based on fingerprint control options.)
+        NOTE: Overriding the CACHE_FILE *ignores* fingerprint control options.
+              Do not use the same CACHE_FILE with different cmdline options,
+                or the results will make no sense.
+              (The default CACHE_FILE automatically changes based on fingerprint params.)
 
       --no-cache
         do not read or write CACHE_FILE
